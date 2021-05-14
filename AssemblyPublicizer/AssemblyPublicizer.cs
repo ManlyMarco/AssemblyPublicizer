@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using Mono.Cecil;
 
 /// <summary>
@@ -45,64 +46,85 @@ namespace CabbageCrow.AssemblyPublicizer
 	/// </summary>
 	class AssemblyPublicizer
 	{
+		private static bool _isQuiet;
+
 		static void Main(string[] args)
 		{
-			var suffix = "_publicized";
+			Console.WriteLine("DIR " + Environment.CurrentDirectory);
+			var suffix = args.FirstOrDefault(x => x.StartsWith("--suffix:"))?.Replace("--suffix:", "") ?? "";
 			Console.WriteLine(@"Info: Using suffix: " + suffix);
-			var defaultOutputDir = "publicized_assemblies";
 
-			var outputPath = Path.GetFullPath(defaultOutputDir);
-			Console.WriteLine(@"Info: Writing output to: " + outputPath);
+			var defaultOutputDir = args.FirstOrDefault(x => x.StartsWith("--subdir:"))?.Replace("--subdir:", "") ?? "publicized_assemblies";
+			var outputPath = defaultOutputDir;
+			Console.WriteLine(@"Info: Writing output to subdirs: " + outputPath);
 
-			foreach (string input in args)
+			_isQuiet = !args.Contains("--quiet");
+
+			foreach (string input in args.Where(x => !x.StartsWith("--")))
 			{
 				if (Directory.Exists(input))
 				{
 					foreach (var file in Directory.GetFiles(input, "*.dll", SearchOption.AllDirectories))
 					{
 						ProcessAssembly(file, suffix, outputPath);
+						Console.WriteLine();
 					}
 				}
 				else
 				{
 					ProcessAssembly(input, suffix, outputPath);
+					Console.WriteLine();
 				}
 			}
 
-			Console.WriteLine("Completed.");
-			Console.WriteLine();
-			Console.WriteLine("Use the publicized library as your reference and compile your dll with the ");
-			Console.WriteLine(@"option ""Allow unsafe code"" enabled.");
-			Console.WriteLine(@"Without it you get an access violation exception during runtime when accessing");
-			Console.WriteLine("private members except for types.");
+			if (_isQuiet)
+			{
+				Console.WriteLine("Completed.");
+				Console.WriteLine();
+				Console.WriteLine("Use the publicized library as your reference and compile your dll with the ");
+				Console.WriteLine(@"option ""Allow unsafe code"" enabled.");
+				Console.WriteLine(@"Without it you get an access violation exception during runtime when accessing");
+				Console.WriteLine("private members except for types.");
 
-			Exit(0);
+				Exit(0);
+			}
+		}
+
+		private static void LogError(string msg, int errorCode)
+		{
+			var color = Console.ForegroundColor;
+			Console.ForegroundColor = ConsoleColor.Red;
+			Console.WriteLine(msg);
+			Console.ForegroundColor = color;
+
+			if (!_isQuiet) Exit(errorCode);
 		}
 
 		private static void ProcessAssembly(string input, string suffix, string outputPath)
 		{
 			var assName = Path.GetFileNameWithoutExtension(input);
-			var outputName = assName + suffix + Path.GetExtension(input);
 			Console.WriteLine($"Info: Processing Assembly {assName}...");
+
+			var assDir = Path.GetDirectoryName(input);
+			// Needed for cecil saving to let it find other dlls in the same directory
+			if (!string.IsNullOrEmpty(assDir)) Environment.CurrentDirectory = assDir;
 
 			AssemblyDefinition assembly = null;
 
 			if (!File.Exists(input))
 			{
-				Console.WriteLine();
-				Console.WriteLine("ERROR! File doesn't exist or you don't have sufficient permissions.");
-				Exit(30);
+				LogError("ERROR! File doesn't exist or you don't have sufficient permissions.", 30);
+				return;
 			}
 
 			try
 			{
 				assembly = AssemblyDefinition.ReadAssembly((string)input);
 			}
-			catch (Exception)
+			catch (Exception e)
 			{
-				Console.WriteLine();
-				Console.WriteLine("ERROR! Cannot read the assembly. Please check your permissions.");
-				Exit(40);
+				LogError($"ERROR! Cannot read the assembly: {e.Message}\nPlease check your permissions.", 40);
+				return;
 			}
 
 
@@ -112,7 +134,7 @@ namespace CabbageCrow.AssemblyPublicizer
 			var allFields = FilterBackingEventFields(allTypes);
 
 			int count;
-			string reportString = "Changed {0} {1} to public.";
+			string reportString = "Changed {0} {1} to public. ";
 
 			#region Make everything public
 
@@ -129,7 +151,7 @@ namespace CabbageCrow.AssemblyPublicizer
 				}
 			}
 
-			Console.WriteLine(reportString, count, "types");
+			Console.Write(reportString, count, "types");
 
 			count = 0;
 			foreach (var method in allMethods)
@@ -141,7 +163,7 @@ namespace CabbageCrow.AssemblyPublicizer
 				}
 			}
 
-			Console.WriteLine(reportString, count, "methods (including getters and setters)");
+			Console.Write(reportString, count, "methods (including getters and setters)");
 
 			count = 0;
 			foreach (var field in allFields)
@@ -157,30 +179,49 @@ namespace CabbageCrow.AssemblyPublicizer
 
 			#endregion
 
-
-			Console.WriteLine();
-
 			Console.Write("Saving a copy of the modified assembly ...");
 
+			var outputName = assName + suffix + Path.GetExtension(input);
+			outputPath = Path.Combine(assDir ?? "", outputPath ?? "");
 			var outputFile = Path.Combine(outputPath, outputName);
 
 			try
 			{
 				if (outputPath != "" && !Directory.Exists(outputPath))
 					Directory.CreateDirectory(outputPath);
-				assembly.Write(outputFile);
+				File.Delete(outputFile + ".tmp");
+				assembly.Write(outputFile + ".tmp");
+				assembly.Dispose();
+				Thread.Sleep(50);
+				if (File.Exists(outputFile))
+				{
+					Console.WriteLine();
+					Console.Write("Overwriting existing file ...");
+					try
+					{
+						File.Delete(outputFile);
+					}
+					catch
+					{
+						Thread.Sleep(100);
+						File.Delete(outputFile);
+					}
+				}
+				try { File.Move(outputFile + ".tmp", outputFile); }
+				catch
+				{
+					Thread.Sleep(100);
+					File.Move(outputFile + ".tmp", outputFile);
+				}
 			}
-			catch (Exception)
+			catch (Exception ex)
 			{
-				Console.WriteLine();
-				Console.WriteLine("ERROR! Cannot create/overwrite the new assembly. ");
-				Console.WriteLine("Please check the path and its permissions " +
-								  "and in case of overwriting an existing file ensure that it isn't currently used.");
-				Exit(50);
+				LogError("ERROR! Cannot create/overwrite the new assembly: " + ex.Message + "\nPlease check the path and its permissions " +
+						 "and in case of overwriting an existing file ensure that it isn't currently used.", 50);
+				return;
 			}
 
 			Console.WriteLine(" OK");
-			Console.WriteLine();
 		}
 
 		public static void Exit(int exitCode = 0)

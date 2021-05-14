@@ -48,13 +48,21 @@ namespace CabbageCrow.AssemblyPublicizer
 		static void Main(string[] args)
 		{
 			var suffix = "_publicized";
+			Console.WriteLine(@"Info: Using suffix: " + suffix);
 			var defaultOutputDir = "publicized_assemblies";
+
+			var outputPath = Path.GetFullPath(defaultOutputDir);
+			Console.WriteLine(@"Info: Writing output to: " + outputPath);
 
 			foreach (string input in args)
 			{
+				var assName = Path.GetFileNameWithoutExtension(input);
+				var outputName = assName + suffix + Path.GetExtension(input);
+				Console.WriteLine($"Info: Processing Assembly {assName}...");
+
 				AssemblyDefinition assembly = null;
 
-				if (!File.Exists((string)input))
+				if (!File.Exists(input))
 				{
 					Console.WriteLine();
 					Console.WriteLine("ERROR! File doesn't exist or you don't have sufficient permissions.");
@@ -125,14 +133,7 @@ namespace CabbageCrow.AssemblyPublicizer
 
 				Console.WriteLine();
 
-				var outputName = string.Format("{0}{1}{2}",
-				   Path.GetFileNameWithoutExtension((string)input), suffix, Path.GetExtension((string)input));
-				Console.WriteLine(@"Info: Use default output name: ""{0}""", outputName);
-
-				var outputPath = defaultOutputDir;
-				Console.WriteLine(@"Info: Use default output dir: ""{0}""", outputPath);
-
-				Console.WriteLine("Saving a copy of the modified assembly ...");
+				Console.Write("Saving a copy of the modified assembly ...");
 
 				var outputFile = Path.Combine(outputPath, outputName);
 
@@ -150,15 +151,17 @@ namespace CabbageCrow.AssemblyPublicizer
 						"and in case of overwriting an existing file ensure that it isn't currently used.");
 					Exit(50);
 				}
-
-				Console.WriteLine("Completed.");
+				Console.WriteLine(" OK");
 				Console.WriteLine();
-				Console.WriteLine("Use the publicized library as your reference and compile your dll with the ");
-				Console.WriteLine(@"option ""Allow unsafe code"" enabled.");
-				Console.WriteLine(@"Without it you get an access violation exception during runtime when accessing");
-				Console.WriteLine("private members except for types.");
-
 			}
+
+			Console.WriteLine("Completed.");
+			Console.WriteLine();
+			Console.WriteLine("Use the publicized library as your reference and compile your dll with the ");
+			Console.WriteLine(@"option ""Allow unsafe code"" enabled.");
+			Console.WriteLine(@"Without it you get an access violation exception during runtime when accessing");
+			Console.WriteLine("private members except for types.");
+
 			Exit(0);
 		}
 
@@ -173,7 +176,7 @@ namespace CabbageCrow.AssemblyPublicizer
 
 		public static IEnumerable<FieldDefinition> FilterBackingEventFields(IEnumerable<TypeDefinition> allTypes)
 		{
-			List<string> eventNames = allTypes.SelectMany(t=>t.Events).Select(eventDefinition => eventDefinition.Name).ToList();
+			List<string> eventNames = allTypes.SelectMany(t => t.Events).Select(eventDefinition => eventDefinition.Name).ToList();
 
 			return allTypes.SelectMany(x => x.Fields).Where(fieldDefinition => !eventNames.Contains(fieldDefinition.Name));
 		}
